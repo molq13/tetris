@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>테트리스</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: radial-gradient(circle at top, #26385d, #0d1120 62%); color: #f5f7ff; }
+    main { display: flex; gap: 22px; align-items: flex-start; padding: 24px; }
+    .game-shell { position: relative; }
+    canvas { display: block; background: #11182a; border: 3px solid #7f91bd; border-radius: 8px; box-shadow: 0 14px 45px #0009; }
+    #board { width: min(62vw, 300px); height: auto; aspect-ratio: 1 / 2; image-rendering: pixelated; }
+    .overlay { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; background: #0b1020c9; border-radius: 6px; padding: 22px; }
+    .overlay[hidden] { display: none; }
+    h1 { margin: 0 0 6px; font-size: 1.7rem; }
+    p { margin: 0 0 16px; color: #c8d1ea; }
+    aside { min-width: 145px; }
+    .label { margin: 0 0 2px; color: #aebbe0; font-size: .76rem; letter-spacing: .11em; }
+    .score { margin: 0 0 18px; font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    #next { width: 120px; height: 120px; margin: 4px 0 18px; background: #11182a; border: 2px solid #51638d; border-radius: 8px; }
+    .leaderboard { margin: 4px 0 18px; padding: 0; list-style-position: inside; color: #e8edff; font-size: .86rem; line-height: 1.75; }
+    .leaderboard li { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid #ffffff16; }
+    .leaderboard li span:last-child { font-variant-numeric: tabular-nums; }
+    .name-input { width: 100%; margin: 8px 0 10px; padding: 9px; border: 1px solid #90a2d0; border-radius: 7px; background: #fff; color: #18213a; font: inherit; text-align: center; }
+    .save-status { min-height: 1.3em; margin: 7px 0 0; color: #c8d1ea; font-size: .82rem; }
+    button { width: 100%; padding: 10px 12px; border: 0; border-radius: 7px; background: #7cf0c6; color: #10221f; font: inherit; font-weight: 700; cursor: pointer; }
+    button:hover { filter: brightness(1.08); }
+    .help { margin-top: 18px; color: #aebbe0; font-size: .85rem; line-height: 1.65; }
+    kbd { padding: 1px 5px; border: 1px solid #65749a; border-radius: 4px; background: #242e4b; color: #fff; font-family: inherit; }
+    .touch { display: none; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+    .touch button { min-height: 48px; font-size: 1.25rem; background: #334267; color: #fff; touch-action: manipulation; }
+    .touch button.primary { background: #7cf0c6; color: #10221f; }
+    @media (max-width: 540px) { main { gap: 13px; padding: 14px; } aside { min-width: 105px; } #next { width: 96px; height: 96px; } .score { font-size: 1.55rem; } .help { display: none; } .touch { display: grid; } }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="game-shell" aria-label="테트리스 게임판">
+      <canvas id="board" width="300" height="600"></canvas>
+      <div class="overlay" id="overlay">
+        <div><h1 id="message">테트리스</h1><p id="submessage">닉네임을 정하고 게임을 시작하세요.</p><input class="name-input" id="name" maxlength="12" placeholder="닉네임" aria-label="닉네임"><button id="start">게임 시작</button><p class="save-status" id="save-status"></p></div>
+      </div>
+    </section>
+    <aside>
+      <p class="label">점수</p><p class="score" id="score">0</p>
+      <p class="label">최고 점수</p><p class="score" id="best">0</p>
+      <p class="label">다음 블록</p><canvas id="next" width="120" height="120"></canvas>
+      <p class="label">전 세계 순위</p><ol class="leaderboard" id="leaderboard"><li><span>불러오는 중…</span><span></span></li></ol>
+      <button id="pause">일시정지</button>
+      <div class="help"><kbd>←</kbd> <kbd>→</kbd> 이동<br><kbd>↓</kbd> 빠르게 내리기<br><kbd>↑</kbd> 회전<br><kbd>Space</kbd> 즉시 내리기<br><kbd>P</kbd> 일시정지</div>
+      <div class="touch" aria-label="터치 조작">
+        <button data-action="rotate" aria-label="회전">↻</button><button data-action="drop" aria-label="빠르게 내리기">↓</button><button data-action="hard" class="primary" aria-label="즉시 내리기">⇩</button>
+        <button data-action="left" aria-label="왼쪽">←</button><button data-action="down" aria-label="아래">↓</button><button data-action="right" aria-label="오른쪽">→</button>
+      </div>
+    </aside>
+  </main>
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
+    import { getAuth, onAuthStateChanged, signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
+    import { getFirestore, collection, doc, getDocs, limit, orderBy, query, serverTimestamp, setDoc } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
+
+    const firebaseConfig = {
+      apiKey: 'AIzaSyBaUi7xFu03bjm_sFviiQDNJDNdVM9bYGQ',
+      authDomain: 'tetris-ranking-80b6c.firebaseapp.com',
+      projectId: 'tetris-ranking-80b6c',
+      storageBucket: 'tetris-ranking-80b6c.firebasestorage.app',
+      messagingSenderId: '1041544516544',
+      appId: '1:1041544516544:web:375add0bffebfd7313ae25'
+    };
+    const firebaseApp = initializeApp(firebaseConfig);
+    const auth = getAuth(firebaseApp), db = getFirestore(firebaseApp);
+    let currentUser = null;
+    const authReady = new Promise(resolve => onAuthStateChanged(auth, async user => { currentUser = user || (await signInAnonymously(auth)).user; resolve(currentUser); }));
+    const COLS = 10, ROWS = 20, SIZE = 30;
+    const colors = [null, '#55d9ff', '#5271ff', '#ffac45', '#ffe85e', '#65e575', '#be75ff', '#ff6e88'];
+    const pieces = [
+      [[1,1,1,1]], [[2,0,0],[2,2,2]], [[0,0,3],[3,3,3]], [[4,4],[4,4]],
+      [[0,5,5],[5,5,0]], [[0,6,0],[6,6,6]], [[7,7,0],[0,7,7]]
+    ];
+    const boardCanvas = document.querySelector('#board'), ctx = boardCanvas.getContext('2d');
+    const nextCanvas = document.querySelector('#next'), nextCtx = nextCanvas.getContext('2d');
+    const scoreEl = document.querySelector('#score'), bestEl = document.querySelector('#best');
+    const overlay = document.querySelector('#overlay'), message = document.querySelector('#message'), submessage = document.querySelector('#submessage');
+    const nameInput = document.querySelector('#name'), saveStatus = document.querySelector('#save-status'), leaderboard = document.querySelector('#leaderboard');
+    nameInput.value = localStorage.tetrisName || '';
+    let grid, player, next, score, best = Number(localStorage.tetrisBest || 0), running = false, paused = false, dropCounter = 0, lastTime = 0, gameStartedAt = 0, finishedScore = null;
+    bestEl.textContent = best;
+
+    function makeGrid() { return Array.from({length: ROWS}, () => Array(COLS).fill(0)); }
+    function randomPiece() { const matrix = pieces[Math.floor(Math.random() * pieces.length)].map(r => [...r]); return { matrix, x: Math.floor((COLS - matrix[0].length) / 2), y: 0 }; }
+    function collide(g, p) { return p.matrix.some((row, y) => row.some((v, x) => v && (g[y + p.y] === undefined || g[y + p.y][x + p.x] === undefined || g[y + p.y][x + p.x]))); }
+    function merge(g, p) { p.matrix.forEach((row, y) => row.forEach((v, x) => { if (v) g[y + p.y][x + p.x] = v; })); }
+    function clearLines() { let lines = 0; outer: for (let y = ROWS - 1; y >= 0; y--) { for (let x = 0; x < COLS; x++) if (!grid[y][x]) continue outer; grid.splice(y, 1); grid.unshift(Array(COLS).fill(0)); lines++; y++; } if (lines) { score += [0, 100, 300, 500, 800][lines]; updateScore(); } }
+    function updateScore() { scoreEl.textContent = score; if (score > best) { best = score; localStorage.tetrisBest = best; bestEl.textContent = best; } }
+    function safeName() { return nameInput.value.trim().replace(/[^\p{L}\p{N} _-]/gu, '').slice(0, 12); }
+    async function loadLeaderboard() { try { const snapshot = await getDocs(query(collection(db, 'leaderboard'), orderBy('score', 'desc'), limit(10))); leaderboard.replaceChildren(...(snapshot.empty ? [Object.assign(document.createElement('li'), { innerHTML: '<span>아직 기록이 없어요</span><span></span>' })] : snapshot.docs.map((item, index) => { const row = document.createElement('li'), playerName = document.createElement('span'), playerScore = document.createElement('span'); playerName.textContent = `${index + 1}. ${item.data().name}`; playerScore.textContent = item.data().score.toLocaleString(); row.append(playerName, playerScore); return row; }))); } catch { leaderboard.innerHTML = '<li><span>순위를 불러오지 못했어요</span><span></span></li>'; } }
+    async function submitScore() { const name = safeName(); if (!name) { saveStatus.textContent = '닉네임을 입력해 주세요.'; return false; } localStorage.tetrisName = name; saveStatus.textContent = '점수를 저장하는 중…'; try { const user = await authReady; await setDoc(doc(db, 'leaderboard', user.uid), { name, score: finishedScore, updatedAt: serverTimestamp() }); saveStatus.textContent = '순위표에 저장됐어요!'; await loadLeaderboard(); return true; } catch { saveStatus.textContent = '저장에 실패했어요. 인터넷 연결을 확인해 주세요.'; return false; } }
+    function spawn() { player = next; player.x = Math.floor((COLS - player.matrix[0].length) / 2); player.y = 0; next = randomPiece(); drawNext(); if (collide(grid, player)) endGame(); }
+    function rotate(matrix) { return matrix[0].map((_, i) => matrix.map(row => row[i]).reverse()); }
+    function move(dx) { player.x += dx; if (collide(grid, player)) player.x -= dx; }
+    function turn() { const old = player.matrix; const oldX = player.x; player.matrix = rotate(player.matrix); for (const shift of [0, -1, 1, -2, 2]) { player.x = oldX + shift; if (!collide(grid, player)) return; } player.matrix = old; player.x = oldX; }
+    function drop() { player.y++; if (collide(grid, player)) { player.y--; merge(grid, player); clearLines(); spawn(); } dropCounter = 0; }
+    function hardDrop() { do { player.y++; } while (!collide(grid, player)); player.y--; drop(); }
+    function drawCell(c, x, y, value, size = SIZE) { if (!value) return; c.fillStyle = colors[value]; c.fillRect(x * size + 1, y * size + 1, size - 2, size - 2); c.fillStyle = '#ffffff42'; c.fillRect(x * size + 4, y * size + 4, size - 8, 4); }
+    function draw() { ctx.fillStyle = '#11182a'; ctx.fillRect(0, 0, 300, 600); ctx.strokeStyle = '#ffffff0d'; ctx.lineWidth = 1; for (let x=0;x<=COLS;x++) { ctx.beginPath();ctx.moveTo(x*SIZE,0);ctx.lineTo(x*SIZE,600);ctx.stroke(); } for (let y=0;y<=ROWS;y++) { ctx.beginPath();ctx.moveTo(0,y*SIZE);ctx.lineTo(300,y*SIZE);ctx.stroke(); } grid.forEach((r,y)=>r.forEach((v,x)=>drawCell(ctx,x,y,v))); player.matrix.forEach((r,y)=>r.forEach((v,x)=>drawCell(ctx,x+player.x,y+player.y,v))); }
+    function drawNext() { nextCtx.clearRect(0,0,120,120); const n = next.matrix, s = 24, ox = (120 - n[0].length*s)/2, oy = (120 - n.length*s)/2; n.forEach((r,y)=>r.forEach((v,x)=>{ if(v){ nextCtx.fillStyle=colors[v]; nextCtx.fillRect(ox+x*s+1,oy+y*s+1,s-2,s-2); } })); }
+    function loop(time=0) { if (!running) return; const elapsedSeconds = (time - gameStartedAt) / 1000; const interval = Math.max(220, 800 - elapsedSeconds * 1.5); dropCounter += time - lastTime; lastTime = time; if (!paused && dropCounter > interval) drop(); draw(); requestAnimationFrame(loop); }
+    function startGame() { if (!safeName()) { saveStatus.textContent='닉네임을 입력해 주세요.'; return; } localStorage.tetrisName=safeName(); finishedScore=null; saveStatus.textContent=''; grid=makeGrid(); score=0; updateScore(); next=randomPiece(); spawn(); running=true; paused=false; gameStartedAt=performance.now(); lastTime=gameStartedAt; overlay.hidden=true; document.querySelector('#pause').textContent='일시정지'; requestAnimationFrame(loop); }
+    function togglePause() { if(!running) return; paused=!paused; document.querySelector('#pause').textContent=paused?'계속하기':'일시정지'; if(paused){ message.textContent='일시정지';submessage.textContent='P 키 또는 버튼으로 계속하세요.';overlay.hidden=false; }else{overlay.hidden=true;lastTime=performance.now();} }
+    function endGame() { running=false; finishedScore=score; message.textContent='게임 오버'; submessage.textContent=`점수: ${score} — 기록을 저장할까요?`; document.querySelector('#start').textContent='점수 등록 후 다시 시작'; overlay.hidden=false; }
+    document.querySelector('#start').addEventListener('click', async () => { if (finishedScore !== null) await submitScore(); startGame(); }); document.querySelector('#pause').addEventListener('click', togglePause);
+    document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => { if (!running || paused) return; const action=button.dataset.action; if(action==='left') move(-1); else if(action==='right') move(1); else if(action==='down') drop(); else if(action==='drop') drop(); else if(action==='rotate') turn(); else hardDrop(); draw(); }));
+    addEventListener('keydown', e => { const k=e.code; if(['ArrowLeft','ArrowRight','ArrowDown','ArrowUp','Space'].includes(k)) e.preventDefault(); if(k==='KeyP') togglePause(); if(!running||paused) return; if(k==='ArrowLeft')move(-1); else if(k==='ArrowRight')move(1); else if(k==='ArrowDown')drop(); else if(k==='ArrowUp')turn(); else if(k==='Space')hardDrop(); draw(); });
+    draw(); loadLeaderboard();
+  </script>
+</body>
+</html>
